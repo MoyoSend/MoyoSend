@@ -1,0 +1,397 @@
+// Sende — core data model
+// Matches the entities described in the architecture document (section 6.4).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  SUPPORT_AGENT
+  COMPLIANCE_OFFICER
+  ADMIN
+}
+
+enum KycStatus {
+  NOT_STARTED
+  PENDING
+  APPROVED
+  REJECTED
+  MANUAL_REVIEW
+}
+
+enum RiskTier {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  phone         String?   @unique
+  passwordHash  String
+  role          UserRole  @default(CUSTOMER)
+  homeCountry   String // ISO 3166-1 alpha-2, e.g. "GB"
+  kycStatus     KycStatus @default(NOT_STARTED)
+  riskTier      RiskTier  @default(LOW)
+  mfaEnabled    Boolean   @default(false)
+  mfaSecret     String? // stored encrypted at rest via app-level encryption, see utils/crypto.ts
+  isActive      Boolean   @default(true)
+  passwordResetTokenHash String?   @unique // sha256 of the reset token — never store the raw token
+  passwordResetExpiresAt DateTime?
+  stripeCustomerId String? @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  referralCode        String?     @unique
+  referredByUserId    String?
+  referredBy          User?       @relation("UserReferrals", fields: [referredByUserId], references: [id])
+  referrals           User[]      @relation("UserReferrals")
+  redeemedPromoCodeId String?
+  redeemedPromoCode   PromoCode?  @relation(fields: [redeemedPromoCodeId], references: [id])
+
+  devices     Device[]
+  recipients  Recipient[]
+  accounts    Account[]
+  kycCases    KycCase[]
+  sentTxns    Transaction[] @relation("SenderTransactions")
+  auditEvents AuditEvent[]
+  referralRewardsGiven   ReferralReward[]      @relation("ReferrerRewards")
+  referralRewardReceived ReferralReward?       @relation("RefereeReward")
+  promoCodeRedemption    PromoCodeRedemption?
+
+  dailyLimitOverrideMinor BigInt? // null = use the default DAILY_VELOCITY_LIMIT_MINOR
+  limitIncreaseRequests   LimitIncreaseRequest[]
+  billPayments            BillPayment[]
+
+  @@index([kycStatus])
+  @@index([riskTier])
+}
+
+model Device {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  fingerprint  String
+  userAgent    String?
+  lastSeenIp   String?
+  firstSeenAt  DateTime @default(now())
+  lastSeenAt   DateTime @updatedAt
+  trusted      Boolean  @default(false)
+
+  @@unique([userId, fingerprint])
+}
+
+enum RecipientPayoutMethod {
+  BANK_TRANSFER
+  MOBILE_MONEY
+}
+
+model Recipient {
+  id            String                 @id @default(uuid())
+  userId        String
+  user          User                   @relation(fields: [userId], references: [id])
+  fullName      String
+  country       String // ISO 3166-1 alpha-2, e.g. "NG"
+  payoutMethod  RecipientPayoutMethod
+  bankCode      String?
+  accountNumber String? // stored tokenized/encrypted in production, see utils/crypto.ts
+  mobileNetwork String?
+  mobileNumber  String?
+  verified      Boolean                @default(false)
+  verifiedAccountName String? // the real account holder's name, as returned by the bank verification check
+  archived      Boolean                @default(false) // soft-delete: recipients with transaction history can't be hard-deleted (FK constraint), so "delete" just hides them
+  createdAt     DateTime               @default(now())
+
+  transactions Transaction[]
+
+  @@index([userId])
+}
+
+// ---- Ledger (double-entry) ----
+
+enum AccountType {
+  USER_WALLET // one per user, holds funds available to send
+  FEES_REVENUE // internal: platform fee income
+  FX_SPREAD_REVENUE // internal: FX margin income
+  PAYOUT_IN_TRANSIT // internal: funds handed to a payout aggregator, not yet confirmed delivered
+  PARTNER_SETTLEMENT // internal: clearing account with the EMI/BaaS/bank partner
+  REFERRAL_BONUS_EXPENSE // internal: cost of paying referral/promo bonuses
+}
+
+model Account {
+  id        String      @id @default(uuid())
+  type      AccountType
+  currency  String // ISO 4217, e.g. "GBP"
+  userId    String? // null for internal/system accounts
+  user      User?       @relation(fields: [userId], references: [id])
+  createdAt DateTime    @default(now())
+
+  entries LedgerEntry[]
+
+  @@unique([userId, type, currency])
+  @@index([type])
+}
+
+enum EntryDirection {
+  DEBIT
+  CREDIT
+}
+
+// Immutable, append-only. Never updated or deleted — corrections are new
+// offsetting entries referencing the original transaction. Exactly one of
+// transactionId / billPaymentId is set per entry — a posting belongs to
+// either a remittance Transaction or a BillPayment, never both.
+model LedgerEntry {
+  id            String         @id @default(uuid())
+  accountId     String
+  account       Account        @relation(fields: [accountId], references: [id])
+  transactionId String?
+  transaction   Transaction?   @relation(fields: [transactionId], references: [id])
+  billPaymentId String?
+  billPayment   BillPayment?   @relation(fields: [billPaymentId], references: [id])
+  direction     EntryDirection
+  amount        BigInt // minor units (e.g. pence/cents) — never use floats for money
+  currency      String
+  createdAt     DateTime       @default(now())
+
+  @@index([accountId])
+  @@index([transactionId])
+  @@index([billPaymentId])
+}
+
+// ---- Transactions ----
+
+enum TransactionStatus {
+  CREATED
+  QUOTED
+  FUNDS_COLLECTED
+  COMPLIANCE_SCREENED
+  COMPLIANCE_HOLD
+  SENT_TO_PAYOUT
+  PAID_OUT
+  FAILED
+  REFUND_INITIATED
+  REFUNDED
+  REJECTED
+}
+
+model Transaction {
+  id                String            @id @default(uuid())
+  idempotencyKey    String            @unique
+  senderId          String
+  sender            User              @relation("SenderTransactions", fields: [senderId], references: [id])
+  recipientId       String
+  recipient         Recipient         @relation(fields: [recipientId], references: [id])
+  corridorId        String
+  corridor          Corridor          @relation(fields: [corridorId], references: [id])
+  sendAmount        BigInt // minor units, in send currency
+  sendCurrency      String
+  receiveAmount     BigInt // minor units, in receive currency
+  receiveCurrency   String
+  fxRateLocked      Decimal           @db.Decimal(18, 8)
+  feeAmount         BigInt // minor units, in send currency
+  status            TransactionStatus @default(CREATED)
+  quoteExpiresAt    DateTime?
+  payoutReference   String? // reference id from the payout aggregator
+  paymentIntentId   String?           @unique // Stripe PaymentIntent id backing this transaction's real charge (web sends only, for now)
+  failureReason     String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  ledgerEntries LedgerEntry[]
+  statusEvents  TransactionStatusEvent[]
+
+  @@index([senderId])
+  @@index([status])
+}
+
+// Every status transition is recorded as its own immutable row so the full
+// history of a transaction can be reconstructed for support and audits.
+model TransactionStatusEvent {
+  id            String            @id @default(uuid())
+  transactionId String
+  transaction   Transaction       @relation(fields: [transactionId], references: [id])
+  fromStatus    TransactionStatus?
+  toStatus      TransactionStatus
+  reason        String?
+  actor         String // "system" | "user:<id>" | "staff:<id>" | "webhook:<provider>"
+  createdAt     DateTime          @default(now())
+
+  @@index([transactionId])
+}
+
+// ---- Compliance / KYC ----
+
+model KycCase {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id])
+  vendor           String // e.g. "sumsub"
+  vendorReference  String?
+  verificationUrl  String? // hosted verification link from the vendor — where we send the user to complete KYC
+  decision         KycStatus @default(PENDING)
+  riskFlags        String[] // e.g. ["PEP_MATCH", "SANCTIONS_POTENTIAL_MATCH"]
+  documentPointers String[] // pointers into encrypted object storage, never raw files here
+  createdAt        DateTime  @default(now())
+  decidedAt        DateTime?
+
+  @@index([userId])
+}
+
+// ---- Corridors ----
+
+model Corridor {
+  id               String   @id @default(uuid())
+  sendCurrency     String
+  receiveCountry   String // ISO 3166-1 alpha-2
+  receiveCurrency  String
+  payoutMethods    RecipientPayoutMethod[]
+  minSendMinor     BigInt
+  maxSendMinor     BigInt
+  feeFlatMinor     BigInt
+  feeBps           Int // basis points fee on top of flat fee
+  fxMarginBps      Int // basis points margin applied to mid-market rate
+  enabled          Boolean  @default(false)
+  payoutProvider   String // e.g. "flutterwave", "cellulant", "thunes"
+  createdAt        DateTime @default(now())
+
+  transactions Transaction[]
+
+  @@unique([sendCurrency, receiveCountry, receiveCurrency])
+}
+
+// ---- Audit ----
+
+model AuditEvent {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  actorLabel String // fallback label when actorId is null (e.g. "system", "webhook:flutterwave")
+  action     String // e.g. "transaction.refund", "kyc.manual_review.approve"
+  targetType String // e.g. "Transaction", "User"
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([actorId])
+}
+
+// ---- Referrals & promo codes ----
+
+model PromoCode {
+  id               String    @id @default(uuid())
+  code             String    @unique
+  label            String // e.g. "influencer:jane_doe" or "spring_campaign"
+  bonusAmountMinor BigInt
+  bonusCurrency    String
+  maxUses          Int? // null = unlimited
+  usedCount        Int       @default(0)
+  active           Boolean   @default(true)
+  expiresAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  redeemedBy  User[]
+  redemptions PromoCodeRedemption[]
+}
+
+model PromoCodeRedemption {
+  id                      String    @id @default(uuid())
+  promoCodeId             String
+  promoCode               PromoCode @relation(fields: [promoCodeId], references: [id])
+  userId                  String    @unique
+  user                    User      @relation(fields: [userId], references: [id])
+  triggeringTransactionId String
+  amountMinor             BigInt
+  currency                String
+  createdAt               DateTime  @default(now())
+}
+
+model ReferralReward {
+  id                      String   @id @default(uuid())
+  referrerId              String
+  referrer                User     @relation("ReferrerRewards", fields: [referrerId], references: [id])
+  refereeId               String   @unique
+  referee                 User     @relation("RefereeReward", fields: [refereeId], references: [id])
+  triggeringTransactionId String
+  referrerAmountMinor     BigInt
+  referrerCurrency        String
+  refereeAmountMinor      BigInt
+  refereeCurrency         String
+  createdAt               DateTime @default(now())
+}
+
+// ---- Bill payments (Nigeria airtime/data — TapTap-style "Pay Bills",
+// deliberately kept separate from the remittance Transaction model: no
+// recipient, no corridor, just a phone number and a network) ----
+
+enum BillPaymentType {
+  AIRTIME
+  DATA
+}
+
+enum BillPaymentStatus {
+  CREATED
+  COMPLIANCE_HOLD
+  FUNDS_COLLECTED
+  SENT_TO_PROVIDER
+  SUCCESSFUL
+  FAILED
+  REFUND_INITIATED
+  REFUNDED
+}
+
+model BillPayment {
+  id                String            @id @default(uuid())
+  idempotencyKey    String            @unique
+  userId            String
+  user              User              @relation(fields: [userId], references: [id])
+  type              BillPaymentType
+  network           String // e.g. "MTN", "GLO", "AIRTEL", "9MOBILE"
+  phoneNumber       String // encrypted, same pattern as Recipient.mobileNumber
+  billerCode        String
+  itemCode          String
+  sendAmount        BigInt // minor units, in sendCurrency
+  sendCurrency      String
+  ngnAmountMinor    BigInt // kobo — what Flutterwave actually charges
+  fxRateLocked      Decimal           @db.Decimal(18, 8)
+  feeAmount         BigInt
+  status            BillPaymentStatus @default(CREATED)
+  providerReference String?           @unique // our own reference, sent as Flutterwave's customer_reference
+  providerTxRef     String?           @unique // Flutterwave's own tx_ref for this attempt — fallback join key for
+                                               // webhooks where customer_reference comes back null (observed in testing)
+  paymentIntentId   String?           @unique // Stripe PaymentIntent id backing this bill payment's real charge
+  failureReason     String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  ledgerEntries LedgerEntry[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ---- Limit increase requests (reuses the KYC vendor's document-collection
+// workflow — see kyc.service.ts — rather than building our own file upload) ----
+
+model LimitIncreaseRequest {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+  documentType    String // "PAY_SLIP" | "BANK_STATEMENT" | "TAX_RETURN" | "INVESTMENT_PENSION"
+  vendor          String
+  vendorReference String    @unique
+  verificationUrl String?
+  status          KycStatus @default(PENDING) // reuses the same PENDING/APPROVED/REJECTED/MANUAL_REVIEW states as KycCase
+  decidedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([userId])
+}
