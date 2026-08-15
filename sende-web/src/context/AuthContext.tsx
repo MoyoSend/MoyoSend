@@ -11,6 +11,7 @@ interface AuthState {
   signUp: (email: string, password: string, homeCountry: string, referralOrPromoCode?: string) => Promise<void>;
   login: (email: string, password: string, mfaCode?: string) => Promise<void>;
   logout: () => void;
+  updateUser: (patch: Partial<NonNullable<AuthResponse["user"]>>) => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -43,6 +44,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const dismissNewDeviceAlert = useCallback(() => setNewDeviceAlert(false), []);
+  const updateUser = useCallback((patch: Partial<NonNullable<AuthResponse["user"]>>) => {
+    setUser((prev) => (prev ? { ...prev, ...patch } : prev));
+  }, []);
 
   const logout = useCallback(() => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
@@ -72,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, logout]);
 
   return (
-    <AuthContext.Provider value={{ user, newDeviceAlert, dismissNewDeviceAlert, signUp, login, logout }}>
+    <AuthContext.Provider value={{ user, newDeviceAlert, dismissNewDeviceAlert, signUp, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

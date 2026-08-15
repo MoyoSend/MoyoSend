@@ -3,7 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
 
 export default function MfaSettings() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const [enabled, setEnabled] = useState(Boolean(user?.mfaEnabled));
   const [otpauthUrl, setOtpauthUrl] = useState<string | null>(null);
   const [code, setCode] = useState("");
@@ -32,6 +32,7 @@ export default function MfaSettings() {
         setEnabled(true);
         setOtpauthUrl(null);
         setCode("");
+        updateUser({ mfaEnabled: true });
       }
     } catch {
       setError("That code didn't match — check your authenticator app and try again.");
