@@ -7,6 +7,7 @@ import {
   type Quote,
   type Recipient,
   type SavedCard,
+  type WalletBalance,
 } from "../api/client";
 import CardPaymentForm from "./CardPaymentForm";
 import { stripePromise } from "../lib/stripeClient";
@@ -62,6 +63,7 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
   const [result, setResult] = useState<"success" | "hold" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
+  const [walletBalances, setWalletBalances] = useState<WalletBalance[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<string>("new");
   const [savePaymentMethod, setSavePaymentMethod] = useState(false);
   const [confirmingSavedCard, setConfirmingSavedCard] = useState(false);
@@ -86,6 +88,10 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
     api
       .listPaymentMethods()
       .then(({ cards }) => setSavedCards(cards))
+      .catch(() => {});
+    api
+      .getWalletBalances()
+      .then(({ balances }) => setWalletBalances(balances))
       .catch(() => {});
   }, []);
 
@@ -118,6 +124,8 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
     (c) => c.sendCurrency === sendCurrency && c.receiveCountry === receiveCountry
   );
 
+  const walletBalanceForCurrency = walletBalances.find((b) => b.currency === sendCurrency) ?? null;
+
   useEffect(() => {
     setQuote(null);
     if (!selectedCorridor) return;
@@ -137,6 +145,12 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
       const sendAmountMinor = String(Math.round(Number(amount) * 100));
       const ref = newIdempotencyKey();
 
+      if (selectedCardId === "wallet") {
+        setTransactionRef(ref);
+        await sendTransaction(ref, undefined, true);
+        return;
+      }
+
       if (selectedCardId !== "new") {
         // Charging a saved card — the backend confirms it immediately, so
         // there's no card entry UI to show. We only need to step in if the
@@ -147,7 +161,7 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
         setTransactionRef(ref);
 
         if (res.status === "succeeded") {
-          await sendTransaction(res.paymentIntentId);
+          await sendTransaction(ref, res.paymentIntentId, false);
           return;
         }
 
@@ -165,7 +179,7 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
             setError(actionError?.message ?? "This card couldn't be verified. Please try a different card.");
             return;
           }
-          await sendTransaction(paymentIntent.id);
+          await sendTransaction(ref, paymentIntent.id, false);
           return;
         }
 
@@ -185,15 +199,20 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
     }
   }
 
-  async function sendTransaction(paymentIntentId: string, mfaCode?: string) {
-    if (!selectedCorridor || !recipientId || !transactionRef) return;
+  async function sendTransaction(
+    ref: string,
+    paymentIntentId: string | undefined,
+    payFromWallet: boolean,
+    mfaCode?: string
+  ) {
+    if (!selectedCorridor || !recipientId) return;
     setError(null);
     setSending(true);
     try {
       const sendAmountMinor = String(Math.round(Number(amount) * 100));
       const res = await api.createTransaction(
-        { recipientId, corridorId: selectedCorridor.id, sendAmountMinor, paymentIntentId },
-        transactionRef,
+        { recipientId, corridorId: selectedCorridor.id, sendAmountMinor, paymentIntentId, payFromWallet },
+        ref,
         mfaCode
       );
       setResult(res.transaction ? "success" : "hold");
@@ -207,13 +226,17 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
         setSending(false);
         const code = window.prompt("Enter your 6-digit authenticator code to confirm this transfer:");
         if (code) {
-          await sendTransaction(paymentIntentId, code);
+          await sendTransaction(ref, paymentIntentId, payFromWallet, code);
         } else {
           setError("Sending this amount requires a verification code.");
         }
         return;
       }
-      setError("We couldn't complete this transfer. Please check the amount and try again.");
+      if (err instanceof ApiError && err.status === 400 && payFromWallet) {
+        setError("Your wallet balance is too low for this transfer.");
+      } else {
+        setError("We couldn't complete this transfer. Please check the amount and try again.");
+      }
     } finally {
       setSending(false);
     }
@@ -352,10 +375,16 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
           </select>
         </label>
 
-        {savedCards.length > 0 && !clientSecret && (
+        {(savedCards.length > 0 || walletBalanceForCurrency) && !clientSecret && (
           <label>
             Pay with
             <select value={selectedCardId} onChange={(e) => setSelectedCardId(e.target.value)}>
+              {walletBalanceForCurrency && (
+                <option value="wallet">
+                  Wallet balance ({(Number(walletBalanceForCurrency.balanceMinor) / 100).toFixed(2)}{" "}
+                  {walletBalanceForCurrency.currency})
+                </option>
+              )}
               {savedCards.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.brand} •••• {c.last4} (exp {String(c.expMonth).padStart(2, "0")}/{c.expYear})
@@ -384,7 +413,7 @@ export default function SendMoneyPanel({ recipients, onNeedRecipient, onSent, pr
             clientSecret={clientSecret}
             onSuccess={(paymentIntentId) => {
               setClientSecret(null);
-              sendTransaction(paymentIntentId);
+              if (transactionRef) sendTransaction(transactionRef, paymentIntentId, false);
             }}
             onCancel={() => setClientSecret(null)}
           />

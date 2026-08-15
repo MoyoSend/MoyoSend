@@ -2,6 +2,7 @@ import { useState } from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
+import PasswordInput from "../components/PasswordInput";
 
 export default function SignupScreen({ navigation }: any) {
   const { signUp } = useAuth();
@@ -34,13 +35,7 @@ export default function SignupScreen({ navigation }: any) {
         value={email}
         onChangeText={setEmail}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
+      <PasswordInput placeholder="Password" value={password} onChangeText={setPassword} />
       <TextInput
         style={styles.input}
         placeholder="Home country (e.g. GB, US, DE)"

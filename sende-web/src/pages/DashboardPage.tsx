@@ -11,8 +11,9 @@ import TransferLimitsPanel from "../components/TransferLimitsPanel";
 import BillPaymentPanel from "../components/BillPaymentPanel";
 import GetAppPanel from "../components/GetAppPanel";
 import ManageCardsPanel from "../components/ManageCardsPanel";
+import WalletPanel from "../components/WalletPanel";
 
-type Tab = "send" | "recipients" | "history" | "security" | "referrals" | "limits" | "bills" | "cards" | "app";
+type Tab = "send" | "recipients" | "history" | "security" | "referrals" | "limits" | "bills" | "cards" | "wallet" | "app";
 
 function statusBadgeClass(status: string) {
   if (["PAID_OUT", "FUNDS_COLLECTED", "COMPLIANCE_SCREENED", "SENT_TO_PAYOUT"].includes(status)) return "status-badge-success";
@@ -132,6 +133,9 @@ export default function DashboardPage() {
         <button className={tab === "cards" ? "tab active" : "tab"} onClick={() => setTab("cards")}>
           Manage cards
         </button>
+        <button className={tab === "wallet" ? "tab active" : "tab"} onClick={() => setTab("wallet")}>
+          Wallet
+        </button>
         <button className={tab === "app" ? "tab active" : "tab"} onClick={() => setTab("app")}>
           Get the app
         </button>
@@ -240,6 +244,8 @@ export default function DashboardPage() {
         {tab === "bills" && <BillPaymentPanel />}
 
         {tab === "cards" && <ManageCardsPanel />}
+
+        {tab === "wallet" && <WalletPanel />}
 
         {tab === "app" && <GetAppPanel />}
 

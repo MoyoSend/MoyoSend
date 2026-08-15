@@ -47,6 +47,7 @@ function assertBalanced(legs: PostingLeg[]) {
 export interface LedgerReference {
   transactionId?: string;
   billPaymentId?: string;
+  walletTopUpId?: string;
 }
 
 /**
@@ -61,8 +62,8 @@ export async function postLedgerEntries(
   legs: PostingLeg[],
   tx: Prisma.TransactionClient = prisma
 ) {
-  if (!reference.transactionId && !reference.billPaymentId) {
-    throw new Error("postLedgerEntries requires either a transactionId or a billPaymentId");
+  if (!reference.transactionId && !reference.billPaymentId && !reference.walletTopUpId) {
+    throw new Error("postLedgerEntries requires a transactionId, a billPaymentId, or a walletTopUpId");
   }
   if (legs.length < 2) {
     throw new LedgerImbalanceError("a posting needs at least two legs (one debit, one credit)");
@@ -74,6 +75,7 @@ export async function postLedgerEntries(
       accountId: leg.accountId,
       transactionId: reference.transactionId,
       billPaymentId: reference.billPaymentId,
+      walletTopUpId: reference.walletTopUpId,
       direction: leg.direction,
       amount: leg.amountMinor,
       currency: leg.currency,

@@ -8,6 +8,7 @@ import {
   getOrCreateSystemAccount,
   getOrCreateUserWallet,
   postLedgerEntries,
+  getAccountBalance,
 } from "../ledger/ledger.service";
 import type { TransactionStatus } from "@prisma/client";
 
@@ -36,6 +37,7 @@ interface CreateTransactionInput {
   corridorId: string;
   sendAmountMinor: bigint;
   paymentIntentId?: string;
+  payFromWallet?: boolean;
 }
 
 /**
@@ -165,7 +167,16 @@ export async function createAndProcessTransaction(input: CreateTransactionInput)
   // paymentIntentId is provided, it must check out against Stripe directly
   // before anything else happens; if none is provided, we log it and let
   // the send through, as a temporary bridge until mobile also has this. ---
-  if (input.paymentIntentId) {
+  if (input.payFromWallet) {
+    const senderWalletForCheck = await getOrCreateUserWallet(input.senderId, corridor.sendCurrency);
+    const walletBalance = await getAccountBalance(senderWalletForCheck.id);
+    if (walletBalance < input.sendAmountMinor) {
+      await prisma.$transaction(async (tx) => {
+        await transitionStatus(tx, transaction.id, "CREATED", "FAILED", "system", "insufficient_wallet_balance");
+      });
+      throw new InsufficientFundsError();
+    }
+  } else if (input.paymentIntentId) {
     try {
       await verifyPaymentIntent(input.paymentIntentId, input.sendAmountMinor, corridor.sendCurrency);
     } catch (err) {
@@ -208,26 +219,36 @@ export async function createAndProcessTransaction(input: CreateTransactionInput)
 
   await prisma.$transaction(async (tx) => {
     const senderWallet = await getOrCreateUserWallet(input.senderId, corridor.sendCurrency, tx);
-    const senderBalance = await tx.ledgerEntry.aggregate({
-      where: { accountId: senderWallet.id },
-      _sum: { amount: true },
-    });
-    // NOTE: for a real balance check use the same credit-minus-debit logic
-    // as ledger.service.getAccountBalance; simplified here for brevity.
-    void senderBalance;
-
     const feeAccount = await getOrCreateSystemAccount("FEES_REVENUE", corridor.sendCurrency, tx);
     const payoutInTransit = await getOrCreateSystemAccount("PAYOUT_IN_TRANSIT", corridor.sendCurrency, tx);
 
-    await postLedgerEntries(
-      { transactionId: transaction.id },
-      [
-        { accountId: senderWallet.id, direction: "DEBIT", amountMinor: totalDebitMinor, currency: corridor.sendCurrency },
-        { accountId: feeAccount.id, direction: "CREDIT", amountMinor: feeAmountMinor, currency: corridor.sendCurrency },
-        { accountId: payoutInTransit.id, direction: "CREDIT", amountMinor: netToPayoutMinor, currency: corridor.sendCurrency },
-      ],
-      tx
-    );
+    let legs;
+    if (input.payFromWallet) {
+      // Paying from an existing wallet balance — that money already
+      // entered the platform at top-up time, so this is just a plain
+      // spend: the wallet's resting balance actually goes down.
+      legs = [
+        { accountId: senderWallet.id, direction: "DEBIT" as const, amountMinor: totalDebitMinor, currency: corridor.sendCurrency },
+        { accountId: feeAccount.id, direction: "CREDIT" as const, amountMinor: feeAmountMinor, currency: corridor.sendCurrency },
+        { accountId: payoutInTransit.id, direction: "CREDIT" as const, amountMinor: netToPayoutMinor, currency: corridor.sendCurrency },
+      ];
+    } else {
+      // Card-paid — the Stripe charge landing — money enters the
+      // platform's cash account and is credited to the sender's wallet,
+      // before immediately being spent below. Nets to zero effect on the
+      // wallet's resting balance, which is correct: this money was never
+      // actually sitting in a spendable balance.
+      const platformCash = await getOrCreateSystemAccount("PLATFORM_CASH", corridor.sendCurrency, tx);
+      legs = [
+        { accountId: platformCash.id, direction: "DEBIT" as const, amountMinor: totalDebitMinor, currency: corridor.sendCurrency },
+        { accountId: senderWallet.id, direction: "CREDIT" as const, amountMinor: totalDebitMinor, currency: corridor.sendCurrency },
+        { accountId: senderWallet.id, direction: "DEBIT" as const, amountMinor: totalDebitMinor, currency: corridor.sendCurrency },
+        { accountId: feeAccount.id, direction: "CREDIT" as const, amountMinor: feeAmountMinor, currency: corridor.sendCurrency },
+        { accountId: payoutInTransit.id, direction: "CREDIT" as const, amountMinor: netToPayoutMinor, currency: corridor.sendCurrency },
+      ];
+    }
+
+    await postLedgerEntries({ transactionId: transaction.id }, legs, tx);
 
     await transitionStatus(tx, transaction.id, "CREATED", "FUNDS_COLLECTED", "system");
     await transitionStatus(tx, transaction.id, "FUNDS_COLLECTED", "COMPLIANCE_SCREENED", "system");
@@ -329,7 +350,7 @@ async function grantFirstTransferBonusesIfEligible(
         const expenseAccount = await getOrCreateSystemAccount("REFERRAL_BONUS_EXPENSE", sendCurrency, tx);
 
         await postLedgerEntries(
-          triggeringTransactionId,
+          { transactionId: triggeringTransactionId },
           [
             { accountId: expenseAccount.id, direction: "DEBIT", amountMinor: bonusMinor * 2n, currency: sendCurrency },
             { accountId: refereeWallet.id, direction: "CREDIT", amountMinor: bonusMinor, currency: sendCurrency },
@@ -367,7 +388,7 @@ async function grantFirstTransferBonusesIfEligible(
       const expenseAccount = await getOrCreateSystemAccount("REFERRAL_BONUS_EXPENSE", promoCode.bonusCurrency, tx);
 
       await postLedgerEntries(
-        triggeringTransactionId,
+        { transactionId: triggeringTransactionId },
         [
           {
             accountId: expenseAccount.id,

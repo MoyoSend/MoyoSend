@@ -145,9 +145,18 @@ export async function createAndProcessBillPayment(input: CreateBillPaymentInput)
     const feeAccount = await getOrCreateSystemAccount("FEES_REVENUE", input.sendCurrency, tx);
     const inTransitAccount = await getOrCreateSystemAccount("PAYOUT_IN_TRANSIT", input.sendCurrency, tx);
 
+    const platformCash = await getOrCreateSystemAccount("PLATFORM_CASH", input.sendCurrency, tx);
+
     await postLedgerEntries(
       { billPaymentId: billPayment.id },
       [
+        // The Stripe charge landing — money enters the platform's cash
+        // account and is credited to the user's wallet, before immediately
+        // being spent below. Net effect on the wallet's resting balance is
+        // zero for a card-paid bill, which is correct: this money was
+        // never actually sitting in a spendable balance.
+        { accountId: platformCash.id, direction: "DEBIT", amountMinor: sendAmountMinor, currency: input.sendCurrency },
+        { accountId: senderWallet.id, direction: "CREDIT", amountMinor: sendAmountMinor, currency: input.sendCurrency },
         { accountId: senderWallet.id, direction: "DEBIT", amountMinor: sendAmountMinor, currency: input.sendCurrency },
         { accountId: feeAccount.id, direction: "CREDIT", amountMinor: feeAmountMinor, currency: input.sendCurrency },
         {

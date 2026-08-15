@@ -23,6 +23,7 @@ const createTransactionSchema = z.object({
   corridorId: z.string().uuid(),
   sendAmountMinor: z.coerce.bigint().positive(),
   paymentIntentId: z.string().min(1).optional(),
+  payFromWallet: z.boolean().optional(),
 });
 
 export default async function transactionsRoutes(app: FastifyInstance) {
@@ -55,6 +56,7 @@ export default async function transactionsRoutes(app: FastifyInstance) {
           corridorId: body.corridorId,
           sendAmountMinor: body.sendAmountMinor,
           paymentIntentId: body.paymentIntentId,
+          payFromWallet: body.payFromWallet,
         });
         return reply.code(201).send({ transaction });
       } catch (err) {

@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
+import PasswordInput from "../components/PasswordInput";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -66,12 +67,7 @@ export default function LoginPage() {
               </label>
               <label>
                 Password
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
+                <PasswordInput required value={password} onChange={(e) => setPassword(e.target.value)} />
               </label>
               <p className="muted" style={{ textAlign: "right", marginTop: "-8px" }}>
                 <Link to="/forgot-password">Forgot password?</Link>

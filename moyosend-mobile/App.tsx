@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -11,6 +12,7 @@ import RecipientsScreen from "./src/screens/RecipientsScreen";
 import AddRecipientScreen from "./src/screens/AddRecipientScreen";
 import TransactionHistoryScreen from "./src/screens/TransactionHistoryScreen";
 import TransactionDetailScreen from "./src/screens/TransactionDetailScreen";
+import ManageCardsScreen from "./src/screens/ManageCardsScreen";
 import { ActivityIndicator, View, TouchableOpacity, Text } from "react-native";
 
 const Stack = createNativeStackNavigator();
@@ -53,6 +55,15 @@ function LogoutButton() {
   );
 }
 
+function IdleActivityWrapper({ children }: { children: ReactNode }) {
+  const { registerActivity } = useAuth();
+  return (
+    <View style={{ flex: 1 }} onTouchStart={registerActivity}>
+      {children}
+    </View>
+  );
+}
+
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -64,6 +75,7 @@ function MainTabs() {
       <Tab.Screen name="Send" component={SendMoneyScreen} options={{ title: "Send money" }} />
       <Tab.Screen name="Recipients" component={RecipientsStackNavigator} options={{ headerShown: false }} />
       <Tab.Screen name="History" component={HistoryStackNavigator} options={{ headerShown: false }} />
+      <Tab.Screen name="Cards" component={ManageCardsScreen} options={{ title: "Manage cards" }} />
     </Tab.Navigator>
   );
 }
@@ -98,9 +110,11 @@ export default function App() {
     <ErrorBoundary>
       <StripeProvider publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY as string}>
         <AuthProvider>
-          <NavigationContainer>
-            <RootNavigator />
-          </NavigationContainer>
+          <IdleActivityWrapper>
+            <NavigationContainer>
+              <RootNavigator />
+            </NavigationContainer>
+          </IdleActivityWrapper>
         </AuthProvider>
       </StripeProvider>
     </ErrorBoundary>

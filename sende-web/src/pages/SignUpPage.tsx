@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
+import PasswordInput from "../components/PasswordInput";
 
 const SEND_COUNTRIES = [
   { code: "GB", label: "United Kingdom (GBP)" },
@@ -74,8 +75,7 @@ export default function SignUpPage() {
               </label>
               <label>
                 Password
-                <input
-                  type="password"
+                <PasswordInput
                   required
                   minLength={12}
                   value={password}

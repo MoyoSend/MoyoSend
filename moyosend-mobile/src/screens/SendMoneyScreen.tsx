@@ -2,10 +2,10 @@ import { useCallback, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from "react-native";
 import { useStripe } from "@stripe/stripe-react-native";
-import { api, newIdempotencyKey, ApiError, type Recipient, type Corridor, type Quote } from "../api/client";
+import { api, newIdempotencyKey, ApiError, type Recipient, type Corridor, type Quote, type SavedCard } from "../api/client";
 
 export default function SendMoneyScreen() {
-  const { initPaymentSheet, presentPaymentSheet } = useStripe();
+  const { initPaymentSheet, presentPaymentSheet, handleNextAction } = useStripe();
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [corridors, setCorridors] = useState<Corridor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +22,9 @@ export default function SendMoneyScreen() {
   const [pendingPayment, setPendingPayment] = useState<{ paymentIntentId: string; idempotencyKey: string } | null>(
     null
   );
+  const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
+  const [selectedCardId, setSelectedCardId] = useState<string>("new");
+  const [savePaymentMethod, setSavePaymentMethod] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -36,6 +39,12 @@ export default function SendMoneyScreen() {
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
+      api
+        .listPaymentMethods()
+        .then(({ cards }) => {
+          if (!cancelled) setSavedCards(cards);
+        })
+        .catch(() => {});
       return () => {
         cancelled = true;
       };
@@ -97,30 +106,60 @@ export default function SendMoneyScreen() {
       } else {
         idempotencyKey = newIdempotencyKey();
 
-        // Collect real payment before anything else — a PaymentIntent is
-        // created first, then the card is collected via Stripe's own native
-        // UI (Payment Sheet), matching the web flow's Stripe Elements step.
-        const created = await api.createPaymentIntent(sendAmountMinor, selectedCorridor.sendCurrency, idempotencyKey);
+        if (selectedCardId !== "new") {
+          // Charging a saved card — the backend confirms it immediately, so
+          // there's no card entry UI to show. We only need to step in if the
+          // issuing bank demands 3D Secure authentication.
+          const created = await api.createPaymentIntent(
+            sendAmountMinor,
+            selectedCorridor.sendCurrency,
+            idempotencyKey,
+            { paymentMethodId: selectedCardId }
+          );
 
-        const { error: initError } = await initPaymentSheet({
-          merchantDisplayName: "MoyoSend",
-          paymentIntentClientSecret: created.clientSecret,
-        });
-        if (initError) {
-          setError(initError.message);
-          return;
-        }
-
-        const { error: presentError } = await presentPaymentSheet();
-        if (presentError) {
-          // A user-cancelled sheet isn't a real error — don't show a scary message for it.
-          if (presentError.code !== "Canceled") {
-            setError(presentError.message);
+          if (created.status === "requires_action") {
+            const { error: actionError } = await handleNextAction(created.clientSecret);
+            if (actionError) {
+              setError(actionError.message ?? "This card couldn't be verified. Please try a different card.");
+              return;
+            }
+          } else if (created.status !== "succeeded") {
+            setError("This card was declined. Please try a different card.");
+            return;
           }
-          return;
+
+          paymentIntentId = created.paymentIntentId;
+        } else {
+          // Collect a new card via Stripe's own native UI (Payment Sheet),
+          // matching the web flow's Stripe Elements step.
+          const created = await api.createPaymentIntent(
+            sendAmountMinor,
+            selectedCorridor.sendCurrency,
+            idempotencyKey,
+            { savePaymentMethod }
+          );
+
+          const { error: initError } = await initPaymentSheet({
+            merchantDisplayName: "MoyoSend",
+            paymentIntentClientSecret: created.clientSecret,
+          });
+          if (initError) {
+            setError(initError.message);
+            return;
+          }
+
+          const { error: presentError } = await presentPaymentSheet();
+          if (presentError) {
+            // A user-cancelled sheet isn't a real error — don't show a scary message for it.
+            if (presentError.code !== "Canceled") {
+              setError(presentError.message);
+            }
+            return;
+          }
+
+          paymentIntentId = created.paymentIntentId;
         }
 
-        paymentIntentId = created.paymentIntentId;
         setPendingPayment({ paymentIntentId, idempotencyKey });
       }
 
@@ -154,6 +193,8 @@ export default function SendMoneyScreen() {
     setStepUpRequired(false);
     setMfaCode("");
     setPendingPayment(null);
+    setSelectedCardId("new");
+    setSavePaymentMethod(false);
   }
 
   if (loading) {
@@ -251,6 +292,39 @@ export default function SendMoneyScreen() {
             </View>
           )}
 
+          {quote && !pendingPayment && (
+            <>
+              <Text style={styles.label}>Pay with</Text>
+              {savedCards.map((c) => (
+                <TouchableOpacity
+                  key={c.id}
+                  style={[styles.recipientRow, selectedCardId === c.id && styles.recipientRowActive]}
+                  onPress={() => setSelectedCardId(c.id)}
+                >
+                  <Text style={styles.recipientName}>
+                    {c.brand.toUpperCase()} •••• {c.last4}
+                  </Text>
+                  <Text style={styles.recipientDetail}>
+                    exp {String(c.expMonth).padStart(2, "0")}/{c.expYear}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={[styles.recipientRow, selectedCardId === "new" && styles.recipientRowActive]}
+                onPress={() => setSelectedCardId("new")}
+              >
+                <Text style={styles.recipientName}>Use a new card</Text>
+              </TouchableOpacity>
+
+              {selectedCardId === "new" && (
+                <TouchableOpacity style={styles.saveCardRow} onPress={() => setSavePaymentMethod((v) => !v)}>
+                  <View style={[styles.checkbox, savePaymentMethod && styles.checkboxChecked]} />
+                  <Text style={styles.recipientDetail}>Save this card for future use</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+
           {stepUpRequired && (
             <>
               <Text style={styles.label}>6-digit authentication code</Text>
@@ -331,6 +405,16 @@ const styles = StyleSheet.create({
   sendButton: { backgroundColor: "#0e9488", borderRadius: 8, padding: 14, alignItems: "center", marginTop: 16 },
   sendButtonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
   emptyText: { color: "#667", fontSize: 14, textAlign: "center" },
+  saveCardRow: { flexDirection: "row", alignItems: "center", marginTop: 8, marginBottom: 4 },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "#0e9488",
+    marginRight: 8,
+  },
+  checkboxChecked: { backgroundColor: "#0e9488" },
   error: { color: "#b3261e", fontSize: 13, marginTop: 12 },
   success: { color: "#0e9488", fontSize: 16, textAlign: "center", marginBottom: 16 },
   warn: { color: "#b45309", fontSize: 16, textAlign: "center", marginBottom: 16 },

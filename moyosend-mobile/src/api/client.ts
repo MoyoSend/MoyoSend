@@ -128,6 +128,14 @@ export interface Bank {
   name: string;
 }
 
+export interface SavedCard {
+  id: string;
+  brand: string;
+  last4: string;
+  expMonth: number;
+  expYear: number;
+}
+
 export interface NewRecipient {
   fullName: string;
   country: string;
@@ -214,11 +222,23 @@ export const api = {
   getQuote: (sendCurrency: string, receiveCurrency: string, corridorId: string) =>
     request<Quote>("/quotes", { method: "POST", body: { sendCurrency, receiveCurrency, corridorId } }),
 
-  createPaymentIntent: (amountMinor: string, currency: string, transactionRef: string) =>
-    request<{ clientSecret: string; paymentIntentId: string }>("/payments/create-intent", {
+  createPaymentIntent: (
+    amountMinor: string,
+    currency: string,
+    transactionRef: string,
+    options?: { paymentMethodId?: string; savePaymentMethod?: boolean }
+  ) =>
+    request<{ clientSecret: string; paymentIntentId: string; status: string }>("/payments/create-intent", {
       method: "POST",
-      body: { amountMinor, currency, transactionRef },
+      body: { amountMinor, currency, transactionRef, ...options },
     }),
+
+  createSetupIntent: () => request<{ clientSecret: string }>("/payments/setup-intent", { method: "POST", body: {} }),
+
+  listPaymentMethods: () => request<{ cards: SavedCard[] }>("/payments/payment-methods"),
+
+  deletePaymentMethod: (id: string) =>
+    request<{ removed: boolean }>(`/payments/payment-methods/${id}`, { method: "DELETE" }),
 
   createTransaction: async (input: NewTransaction, idempotencyKey: string, mfaCode?: string) => {
     const fingerprint = await getDeviceFingerprint();

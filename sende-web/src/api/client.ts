@@ -174,6 +174,28 @@ export const api = {
 
   getReferralInfo: () => request<ReferralInfo>("/referrals/me"),
 
+  createWalletTopUpIntent: (
+    amountMinor: string,
+    currency: string,
+    options?: { paymentMethodId?: string; savePaymentMethod?: boolean }
+  ) =>
+    request<{ clientSecret: string; paymentIntentId: string; status: string }>("/wallet/top-up/intent", {
+      method: "POST",
+      body: { amountMinor, currency, ...options },
+    }),
+
+  confirmWalletTopUp: (
+    input: { amountMinor: string; currency: string; paymentIntentId: string },
+    idempotencyKey: string
+  ) =>
+    request<{ walletTopUp: WalletTopUp }>("/wallet/top-up/confirm", {
+      method: "POST",
+      body: input,
+      idempotencyKey,
+    }),
+
+  getWalletBalances: () => request<{ balances: WalletBalance[] }>("/wallet/balances"),
+
   createPaymentIntent: (
     amountMinor: string,
     currency: string,
@@ -268,6 +290,19 @@ export interface ReferralInfo {
   totalEarnedByCurrency: Record<string, string>;
 }
 
+export interface WalletTopUp {
+  id: string;
+  amountMinor: string;
+  currency: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface WalletBalance {
+  currency: string;
+  balanceMinor: string;
+}
+
 export interface Corridor {
   id: string;
   sendCurrency: string;
@@ -321,6 +356,7 @@ export interface NewTransaction {
   corridorId: string;
   sendAmountMinor: string;
   paymentIntentId?: string;
+  payFromWallet?: boolean;
 }
 
 export interface Transaction {

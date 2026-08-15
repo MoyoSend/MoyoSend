@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import { Elements, PaymentElement, ExpressCheckoutElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { stripePromise } from "../lib/stripeClient";
 
 function InnerForm({
@@ -14,8 +14,7 @@ function InnerForm({
   const [error, setError] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function confirmPayment() {
     if (!stripe || !elements) return;
     setError(null);
     setPaying(true);
@@ -39,8 +38,21 @@ function InnerForm({
     }
   }
 
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    await confirmPayment();
+  }
+
+  // Fires when the user taps a wallet button (Google Pay / Apple Pay / Link) —
+  // bypasses the regular form submit, so it needs its own handler that
+  // reuses the same confirmPayment logic.
+  async function handleExpressCheckout() {
+    await confirmPayment();
+  }
+
   return (
     <form className="card-payment-form" onSubmit={handleSubmit}>
+      <ExpressCheckoutElement onConfirm={handleExpressCheckout} />
       <PaymentElement />
       {error && <p className="error">{error}</p>}
       <div className="card-payment-actions">

@@ -69,6 +69,7 @@ model User {
   dailyLimitOverrideMinor BigInt? // null = use the default DAILY_VELOCITY_LIMIT_MINOR
   limitIncreaseRequests   LimitIncreaseRequest[]
   billPayments            BillPayment[]
+  walletTopUps            WalletTopUp[]
 
   @@index([kycStatus])
   @@index([riskTier])
@@ -118,6 +119,7 @@ model Recipient {
 
 enum AccountType {
   USER_WALLET // one per user, holds funds available to send
+  PLATFORM_CASH // internal: real cash sitting in MoyoSend's Stripe/bank account — the ultimate source of a wallet top-up
   FEES_REVENUE // internal: platform fee income
   FX_SPREAD_REVENUE // internal: FX margin income
   PAYOUT_IN_TRANSIT // internal: funds handed to a payout aggregator, not yet confirmed delivered
@@ -146,8 +148,9 @@ enum EntryDirection {
 
 // Immutable, append-only. Never updated or deleted — corrections are new
 // offsetting entries referencing the original transaction. Exactly one of
-// transactionId / billPaymentId is set per entry — a posting belongs to
-// either a remittance Transaction or a BillPayment, never both.
+// transactionId / billPaymentId / walletTopUpId is set per entry — a
+// posting belongs to a remittance Transaction, a BillPayment, or a
+// WalletTopUp, never more than one.
 model LedgerEntry {
   id            String         @id @default(uuid())
   accountId     String
@@ -156,6 +159,8 @@ model LedgerEntry {
   transaction   Transaction?   @relation(fields: [transactionId], references: [id])
   billPaymentId String?
   billPayment   BillPayment?   @relation(fields: [billPaymentId], references: [id])
+  walletTopUpId String?
+  walletTopUp   WalletTopUp?   @relation(fields: [walletTopUpId], references: [id])
   direction     EntryDirection
   amount        BigInt // minor units (e.g. pence/cents) — never use floats for money
   currency      String
@@ -164,6 +169,7 @@ model LedgerEntry {
   @@index([accountId])
   @@index([transactionId])
   @@index([billPaymentId])
+  @@index([walletTopUpId])
 }
 
 // ---- Transactions ----
@@ -225,6 +231,37 @@ model TransactionStatusEvent {
   createdAt     DateTime          @default(now())
 
   @@index([transactionId])
+}
+
+// ---- Wallet top-ups (funding a user's USER_WALLET ledger account via
+// Stripe, so it can later be spent on remittances or bill payments without
+// re-entering card details each time) ----
+
+enum WalletTopUpStatus {
+  CREATED
+  FUNDS_COLLECTED
+  FAILED
+  REFUND_INITIATED
+  REFUNDED
+}
+
+model WalletTopUp {
+  id              String            @id @default(uuid())
+  idempotencyKey  String            @unique
+  userId          String
+  user            User              @relation(fields: [userId], references: [id])
+  amountMinor     BigInt // minor units, in currency — the amount credited to the wallet
+  currency        String
+  status          WalletTopUpStatus @default(CREATED)
+  paymentIntentId String?           @unique // Stripe PaymentIntent id backing this top-up's real charge
+  failureReason   String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  ledgerEntries LedgerEntry[]
+
+  @@index([userId])
+  @@index([status])
 }
 
 // ---- Compliance / KYC ----

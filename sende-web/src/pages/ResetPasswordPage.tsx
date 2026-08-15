@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import PasswordInput from "../components/PasswordInput";
 
 export default function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
@@ -77,8 +78,7 @@ export default function ResetPasswordPage() {
                 <form onSubmit={onSubmit}>
                   <label>
                     New password
-                    <input
-                      type="password"
+                    <PasswordInput
                       required
                       minLength={12}
                       value={newPassword}
@@ -87,8 +87,7 @@ export default function ResetPasswordPage() {
                   </label>
                   <label>
                     Confirm new password
-                    <input
-                      type="password"
+                    <PasswordInput
                       required
                       minLength={12}
                       value={confirmPassword}

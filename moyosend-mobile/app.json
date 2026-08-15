@@ -30,7 +30,7 @@
         "@stripe/stripe-react-native",
         {
           "merchantIdentifier": "merchant.com.moyosend.mobile",
-          "enableGooglePay": false
+          "enableGooglePay": true
         }
       ]
     ],

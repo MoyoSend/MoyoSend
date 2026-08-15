@@ -1,5 +1,8 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from "react";
 import { api, setAccessToken, type AuthResponse } from "../api/client";
+
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes — auto sign-out after this long with no activity
+const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "click"] as const;
 
 interface AuthState {
   user: AuthResponse["user"] | null;
@@ -15,6 +18,7 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthResponse["user"] | null>(null);
   const [newDeviceAlert, setNewDeviceAlert] = useState(false);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applyAuth = useCallback((res: AuthResponse) => {
     setAccessToken(res.accessToken);
@@ -41,10 +45,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const dismissNewDeviceAlert = useCallback(() => setNewDeviceAlert(false), []);
 
   const logout = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     setAccessToken(null);
     setUser(null);
     setNewDeviceAlert(false);
   }, []);
+
+  // Auto sign-out after a period of inactivity — a standard security
+  // measure for a financial app, so a signed-in session left unattended
+  // (e.g. a shared or unlocked device) doesn't stay open indefinitely.
+  useEffect(() => {
+    if (!user) return;
+
+    function resetIdleTimer() {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(logout, IDLE_TIMEOUT_MS);
+    }
+
+    resetIdleTimer();
+    ACTIVITY_EVENTS.forEach((event) => window.addEventListener(event, resetIdleTimer));
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      ACTIVITY_EVENTS.forEach((event) => window.removeEventListener(event, resetIdleTimer));
+    };
+  }, [user, logout]);
 
   return (
     <AuthContext.Provider value={{ user, newDeviceAlert, dismissNewDeviceAlert, signUp, login, logout }}>

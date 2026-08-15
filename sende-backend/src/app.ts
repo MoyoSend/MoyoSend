@@ -11,6 +11,7 @@ import corridorsRoutes from "./modules/corridors/corridors.routes";
 import referralsRoutes from "./modules/referrals/referrals.routes";
 import billsRoutes from "./modules/bills/bills.routes";
 import paymentsRoutes from "./modules/payments/payments.routes";
+import walletRoutes from "./modules/wallet/wallet.routes";
 
 // JSON.stringify can't serialize BigInt by default. We use BigInt for money
 // amounts to avoid floating-point precision bugs, so teach it here — this
@@ -38,7 +39,7 @@ export async function buildApp() {
   await app.register(referralsRoutes, { prefix: "/api/v1" });
   await app.register(billsRoutes, { prefix: "/api/v1" });
   await app.register(paymentsRoutes, { prefix: "/api/v1" });
-
+  await app.register(walletRoutes, { prefix: "/api/v1" });
   app.get("/healthz", async () => ({ status: "ok" }));
 
   app.setErrorHandler((err, req, reply) => {
