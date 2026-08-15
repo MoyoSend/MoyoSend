@@ -19,7 +19,7 @@ export default fp(async function securityPlugin(app: FastifyInstance) {
   });
 
   await app.register(cors, {
-    origin: env.NODE_ENV === "production" ? [/\.sende\.app$/] : true,
+    origin: env.NODE_ENV === "production" ? env.FRONTEND_URL : true,
     credentials: true,
   });
 
