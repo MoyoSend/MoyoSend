@@ -113,18 +113,40 @@ export default function SignUpPage() {
               </form>
             ) : (
               <>
-                <div className="auth-method-toggle" role="tablist">
+                <div
+                  className="auth-method-toggle"
+                  role="tablist"
+                  style={{ display: "flex", gap: "10px", marginBottom: "20px" }}
+                >
                   <button
                     type="button"
-                    className={method === "email" ? "btn-toggle-active" : "btn-toggle"}
                     onClick={() => setMethod("email")}
+                    style={{
+                      flex: 1,
+                      padding: "10px 16px",
+                      borderRadius: "8px",
+                      border: method === "email" ? "1px solid #0e9488" : "1px solid #d7dbe0",
+                      background: method === "email" ? "#0e9488" : "#ffffff",
+                      color: method === "email" ? "#ffffff" : "#3a4150",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
                   >
                     Email
                   </button>
                   <button
                     type="button"
-                    className={method === "phone" ? "btn-toggle-active" : "btn-toggle"}
                     onClick={() => setMethod("phone")}
+                    style={{
+                      flex: 1,
+                      padding: "10px 16px",
+                      borderRadius: "8px",
+                      border: method === "phone" ? "1px solid #0e9488" : "1px solid #d7dbe0",
+                      background: method === "phone" ? "#0e9488" : "#ffffff",
+                      color: method === "phone" ? "#ffffff" : "#3a4150",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
                   >
                     Phone number
                   </button>
