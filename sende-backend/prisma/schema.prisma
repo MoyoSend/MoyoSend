@@ -43,6 +43,9 @@ model User {
   mfaEnabled    Boolean   @default(false)
   mfaSecret     String? // stored encrypted at rest via app-level encryption, see utils/crypto.ts
   isActive      Boolean   @default(true)
+  phoneVerified     Boolean   @default(false)
+  phoneOtpHash      String? // sha256 of the pending signup code — never store the raw code
+  phoneOtpExpiresAt DateTime?
   passwordResetTokenHash String?   @unique // sha256 of the reset token — never store the raw token
   passwordResetExpiresAt DateTime?
   stripeCustomerId String? @unique

@@ -1,40 +1,65 @@
 import { FormEvent, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { ApiError } from "../api/client";
+import { api, ApiError } from "../api/client";
 import PasswordInput from "../components/PasswordInput";
-
 const SEND_COUNTRIES = [
   { code: "GB", label: "United Kingdom (GBP)" },
   { code: "IE", label: "Ireland (EUR)" },
   { code: "DE", label: "Germany (EUR)" },
 ];
-
 export default function SignUpPage() {
-  const { signUp } = useAuth();
+  const { signUp, completePhoneSignUp } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [method, setMethod] = useState<"email" | "phone">("email");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [homeCountry, setHomeCountry] = useState("GB");
   const [referralOrPromoCode, setReferralOrPromoCode] = useState(searchParams.get("ref") ?? "");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
+  // Phone signup is a two-step flow: create the account, then confirm the
+  // code before it's usable. pendingUserId being set means we're on step 2.
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const [devOtpCode, setDevOtpCode] = useState<string | null>(null);
+  const [otpInput, setOtpInput] = useState("");
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      await signUp(email, password, homeCountry, referralOrPromoCode || undefined);
-      navigate("/dashboard");
+      if (method === "email") {
+        await signUp(email, password, homeCountry, referralOrPromoCode || undefined);
+        navigate("/dashboard");
+      } else {
+        const res = await api.startPhoneSignUp(phone, password, homeCountry, referralOrPromoCode || undefined);
+        setPendingUserId(res.userId);
+        // No SMS provider is wired up yet — the demo code is returned
+        // directly by the API instead of being texted. See auth.service.ts.
+        setDevOtpCode(res.devOtpCode);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
   }
-
+  async function onVerifyOtp(e: FormEvent) {
+    e.preventDefault();
+    if (!pendingUserId) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await completePhoneSignUp(pendingUserId, otpInput);
+      navigate("/dashboard");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "That code didn't match. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
   return (
     <div className="auth-page">
       <div className="auth-split">
@@ -59,7 +84,6 @@ export default function SignUpPage() {
             <circle cx="248" cy="140" r="5" fill="#0e9488" opacity="0.7" />
           </svg>
         </div>
-
         <div className="auth-form-panel">
           <div className="auth-card">
             <span className="badge badge-ok">No hidden fees — see your exact rate before you send</span>
@@ -68,44 +92,91 @@ export default function SignUpPage() {
               We'll ask you to verify your identity next — that's required before you can send money, for
               everyone's protection.
             </p>
-            <form onSubmit={onSubmit}>
-              <label>
-                Email
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-              </label>
-              <label>
-                Password
-                <PasswordInput
-                  required
-                  minLength={12}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <span className="hint">At least 12 characters.</span>
-              </label>
-              <label>
-                Where do you live?
-                <select value={homeCountry} onChange={(e) => setHomeCountry(e.target.value)}>
-                  {SEND_COUNTRIES.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Referral or promo code <span className="hint">(optional)</span>
-                <input
-                  value={referralOrPromoCode}
-                  onChange={(e) => setReferralOrPromoCode(e.target.value.toUpperCase())}
-                  placeholder="e.g. AB3XQK9P"
-                />
-              </label>
-              {error && <p className="error">{error}</p>}
-              <button type="submit" disabled={loading}>
-                {loading ? "Creating account…" : "Create account"}
-              </button>
-            </form>
+            {pendingUserId ? (
+              <form onSubmit={onVerifyOtp}>
+                <p>
+                  We've sent a 6-digit code to <strong>{phone}</strong>.
+                </p>
+                {devOtpCode && (
+                  <p className="hint">
+                    Demo mode — no real SMS is sent. Your code is: <strong>{devOtpCode}</strong>
+                  </p>
+                )}
+                <label>
+                  Enter the 6-digit code
+                  <input value={otpInput} onChange={(e) => setOtpInput(e.target.value)} maxLength={6} required />
+                </label>
+                {error && <p className="error">{error}</p>}
+                <button type="submit" disabled={loading || otpInput.length < 6}>
+                  {loading ? "Confirming…" : "Confirm and continue"}
+                </button>
+              </form>
+            ) : (
+              <>
+                <div className="auth-method-toggle" role="tablist">
+                  <button
+                    type="button"
+                    className={method === "email" ? "btn-toggle-active" : "btn-toggle"}
+                    onClick={() => setMethod("email")}
+                  >
+                    Email
+                  </button>
+                  <button
+                    type="button"
+                    className={method === "phone" ? "btn-toggle-active" : "btn-toggle"}
+                    onClick={() => setMethod("phone")}
+                  >
+                    Phone number
+                  </button>
+                </div>
+                <form onSubmit={onSubmit}>
+                  {method === "email" ? (
+                    <label>
+                      Email
+                      <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+                    </label>
+                  ) : (
+                    <label>
+                      Phone number
+                      <input
+                        type="tel"
+                        required
+                        placeholder="e.g. +447700900000"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                      />
+                    </label>
+                  )}
+                  <label>
+                    Password
+                    <PasswordInput required minLength={12} value={password} onChange={(e) => setPassword(e.target.value)} />
+                    <span className="hint">At least 12 characters.</span>
+                  </label>
+                  <label>
+                    Where do you live?
+                    <select value={homeCountry} onChange={(e) => setHomeCountry(e.target.value)}>
+                      {SEND_COUNTRIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Referral or promo code <span className="hint">(optional)</span>
+                    <input
+                      value={referralOrPromoCode}
+                      onChange={(e) => setReferralOrPromoCode(e.target.value.toUpperCase())}
+                      placeholder="e.g. AB3XQK9P"
+                    />
+                  </label>
+                  {error && <p className="error">{error}</p>}
+                  <button type="submit" disabled={loading}>
+                    {loading ? "Creating account…" : "Create account"}
+                  </button>
+                </form>
+              </>
+            )}
             <p className="muted">
               Already have an account? <Link to="/login">Log in</Link>
             </p>

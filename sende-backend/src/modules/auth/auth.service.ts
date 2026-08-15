@@ -103,6 +103,59 @@ export async function signUp(
     throw err;
   }
 }
+const PHONE_OTP_TTL_MINUTES = 10;
+function generateOtpCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+export class InvalidOtpError extends Error {
+  constructor() {
+    super("Invalid or expired code");
+    this.name = "InvalidOtpError";
+  }
+}
+/**
+ * Phone-based signup, step 1: create the account (reusing the same
+ * referral/promo/KYC logic as email signup, via a placeholder internal
+ * email — every account still needs one), then generate a one-time code
+ * the user must confirm before the account is usable.
+ *
+ * No SMS provider is wired up yet, so in this "mock" mode the code is
+ * returned directly in the API response instead of being texted — swap
+ * this for a real provider (Twilio etc.) by sending otpCode there instead.
+ */
+export async function signUpWithPhone(
+  phone: string,
+  password: string,
+  homeCountry: string,
+  referralOrPromoCode?: string
+) {
+  const placeholderEmail = `phone-${phone.replace(/[^0-9]/g, "")}@users.moyosend.local`;
+  const user = await signUp(placeholderEmail, password, homeCountry, referralOrPromoCode);
+  const otpCode = generateOtpCode();
+  const phoneOtpHash = createHash("sha256").update(otpCode).digest("hex");
+  const phoneOtpExpiresAt = new Date(Date.now() + PHONE_OTP_TTL_MINUTES * 60 * 1000);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { phone, phoneOtpHash, phoneOtpExpiresAt },
+  });
+  logger.info({ userId: user.id }, "auth.signup_phone_started");
+  return { userId: user.id, devOtpCode: otpCode };
+}
+/** Phone-based signup, step 2: confirm the code and activate the account. */
+export async function verifyPhoneSignUp(userId: string, code: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || !user.phoneOtpHash || !user.phoneOtpExpiresAt || user.phoneOtpExpiresAt < new Date()) {
+    throw new InvalidOtpError();
+  }
+  const codeHash = createHash("sha256").update(code).digest("hex");
+  if (codeHash !== user.phoneOtpHash) throw new InvalidOtpError();
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: { phoneVerified: true, phoneOtpHash: null, phoneOtpExpiresAt: null },
+  });
+  logger.info({ userId: updated.id }, "auth.signup_phone_verified");
+  return updated;
+}
 export class InvalidMfaCodeError extends Error {
   constructor() {
     super("Invalid MFA code");

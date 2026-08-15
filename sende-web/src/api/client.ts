@@ -45,9 +45,13 @@ export function newIdempotencyKey(): string {
 }
 
 export interface AuthResponse {
-  user: { id: string; email: string; kycStatus?: string; role?: string; mfaEnabled?: boolean };
+  user: { id: string; email: string; phone?: string | null; kycStatus?: string; role?: string; mfaEnabled?: boolean };
   accessToken: string;
   newDevice?: boolean;
+}
+export interface PhoneSignUpStartResponse {
+  userId: string;
+  devOtpCode: string;
 }
 
 function getDeviceFingerprint(): string {
@@ -71,6 +75,16 @@ export const api = {
     request<AuthResponse>("/auth/signup", {
       method: "POST",
       body: { email, password, homeCountry, referralOrPromoCode, fingerprint: getDeviceFingerprint() },
+    }),
+  startPhoneSignUp: (phone: string, password: string, homeCountry: string, referralOrPromoCode?: string) =>
+    request<PhoneSignUpStartResponse>("/auth/signup/phone/start", {
+      method: "POST",
+      body: { phone, password, homeCountry, referralOrPromoCode },
+    }),
+  verifyPhoneSignUp: (userId: string, code: string) =>
+    request<AuthResponse>("/auth/signup/phone/verify", {
+      method: "POST",
+      body: { userId, code, fingerprint: getDeviceFingerprint() },
     }),
 
   login: (email: string, password: string, mfaCode?: string) =>

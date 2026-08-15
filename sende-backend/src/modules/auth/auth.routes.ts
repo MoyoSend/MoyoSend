@@ -11,6 +11,9 @@ import {
   requestPasswordReset,
   resetPassword,
   InvalidResetTokenError,
+  signUpWithPhone,
+  verifyPhoneSignUp,
+  InvalidOtpError,
 } from "./auth.service";
 import { requireAuth } from "../../middleware/auth";
 import { prisma } from "../../db/client";
@@ -31,6 +34,17 @@ const loginSchema = z.object({
   fingerprint: z.string().optional(),
 });
 
+const signUpPhoneStartSchema = z.object({
+  phone: z.string().min(8, "Enter a valid phone number").max(20),
+  password: z.string().min(12, "Password must be at least 12 characters"),
+  homeCountry: z.string().length(2, "homeCountry must be an ISO 3166-1 alpha-2 code"),
+  referralOrPromoCode: z.string().optional(),
+});
+const signUpPhoneVerifySchema = z.object({
+  userId: z.string().uuid(),
+  code: z.string().length(6, "Enter the 6-digit code"),
+  fingerprint: z.string().optional(),
+});
 const forgotPasswordSchema = z.object({
   email: z.string().email(),
 });
@@ -66,6 +80,35 @@ export default async function authRoutes(app: FastifyInstance) {
     });
   });
 
+  app.post("/auth/signup/phone/start", authRateLimit, async (req, reply) => {
+    const body = signUpPhoneStartSchema.parse(req.body);
+    const { userId, devOtpCode } = await signUpWithPhone(
+      body.phone,
+      body.password,
+      body.homeCountry,
+      body.referralOrPromoCode
+    );
+    return reply.code(201).send({ userId, devOtpCode });
+  });
+  app.post("/auth/signup/phone/verify", authRateLimit, async (req, reply) => {
+    const body = signUpPhoneVerifySchema.parse(req.body);
+    try {
+      const user = await verifyPhoneSignUp(body.userId, body.code);
+      if (body.fingerprint) {
+        await recordDeviceLogin(user.id, body.fingerprint, req.headers["user-agent"], req.ip);
+      }
+      const token = app.jwt.sign({ sub: user.id, role: user.role });
+      return reply.code(201).send({
+        user: { id: user.id, email: user.email, phone: user.phone, kycStatus: user.kycStatus, mfaEnabled: false },
+        accessToken: token,
+      });
+    } catch (err) {
+      if (err instanceof InvalidOtpError) {
+        return reply.badRequest(err.message);
+      }
+      throw err;
+    }
+  });
   app.post("/auth/login", authRateLimit, async (req, reply) => {
     const body = loginSchema.parse(req.body);
     try {
