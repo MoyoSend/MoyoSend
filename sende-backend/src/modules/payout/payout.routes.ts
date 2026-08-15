@@ -60,7 +60,7 @@ export default async function payoutRoutes(app: FastifyInstance) {
         // We set the transfer's `reference` to our transaction's UUID when
         // creating it (with a test-mode-only suffix appended in sandbox) —
         // strip that suffix back off to recover the transaction id.
-        const transactionId = body.transfer.reference.split("_PMCK")[0];
+        const transactionId = body.transfer.reference.split("_PMCK")[0] ?? body.transfer.reference;
 
         if (body.transfer.status === "SUCCESSFUL") {
           await confirmPayout(transactionId);

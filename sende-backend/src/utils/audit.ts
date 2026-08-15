@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import type { Prisma } from "@prisma/client";
 
 /**
  * Every action a staff member (or the system) takes against money or KYC
@@ -21,7 +22,7 @@ export async function recordAuditEvent(params: {
       action: params.action,
       targetType: params.targetType,
       targetId: params.targetId,
-      metadata: params.metadata ?? undefined,
+      metadata: params.metadata as Prisma.InputJsonValue | undefined,
     },
   });
 }
