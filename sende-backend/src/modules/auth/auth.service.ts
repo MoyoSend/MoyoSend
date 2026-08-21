@@ -169,13 +169,20 @@ interface LoginResult {
   mfaRequired: boolean;
 }
 
-export async function login(email: string, password: string): Promise<LoginResult> {
-  const user = await prisma.user.findUnique({ where: { email } });
+export async function login(
+  identifier: { email?: string; phone?: string },
+  password: string
+): Promise<LoginResult> {
+  const user = identifier.email
+    ? await prisma.user.findUnique({ where: { email: identifier.email } })
+    : identifier.phone
+    ? await prisma.user.findUnique({ where: { phone: identifier.phone } })
+    : null;
   if (!user || !user.isActive) throw new InvalidCredentialsError();
 
   const valid = await verifyPassword(user.passwordHash, password);
   if (!valid) {
-    logger.warn({ email }, "auth.login_failed");
+    logger.warn({ identifier }, "auth.login_failed");
     throw new InvalidCredentialsError();
   }
 

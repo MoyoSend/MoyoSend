@@ -87,10 +87,10 @@ export const api = {
       body: { userId, code, fingerprint: getDeviceFingerprint() },
     }),
 
-  login: (email: string, password: string, mfaCode?: string) =>
+    login: (identifier: { email?: string; phone?: string }, password: string, mfaCode?: string) =>
     request<AuthResponse>("/auth/login", {
       method: "POST",
-      body: { email, password, mfaCode, fingerprint: getDeviceFingerprint() },
+      body: { ...identifier, password, mfaCode, fingerprint: getDeviceFingerprint() },
     }),
 
   forgotPassword: (email: string) =>

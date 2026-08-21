@@ -27,12 +27,15 @@ const signUpSchema = z.object({
   referralOrPromoCode: z.string().optional(),
 });
 
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-  mfaCode: z.string().optional(),
-  fingerprint: z.string().optional(),
-});
+const loginSchema = z
+  .object({
+    email: z.string().email().optional(),
+    phone: z.string().min(8).optional(),
+    password: z.string().min(1),
+    mfaCode: z.string().optional(),
+    fingerprint: z.string().optional(),
+  })
+  .refine((data) => data.email || data.phone, { message: "Email or phone is required" });
 
 const signUpPhoneStartSchema = z.object({
   phone: z.string().min(8, "Enter a valid phone number").max(20),
@@ -112,7 +115,7 @@ export default async function authRoutes(app: FastifyInstance) {
   app.post("/auth/login", authRateLimit, async (req, reply) => {
     const body = loginSchema.parse(req.body);
     try {
-      const { user, mfaRequired } = await login(body.email, body.password);
+            const { user, mfaRequired } = await login({ email: body.email, phone: body.phone }, body.password);
 
       if (mfaRequired) {
         if (!body.mfaCode) {

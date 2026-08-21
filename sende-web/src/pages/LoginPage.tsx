@@ -3,23 +3,24 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
 import PasswordInput from "../components/PasswordInput";
-
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [method, setMethod] = useState<"email" | "phone">("email");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [mfaRequired, setMfaRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      await login(email, password, mfaCode || undefined);
+      const identifier = method === "email" ? { email } : { phone };
+      await login(identifier, password, mfaCode || undefined);
       navigate("/dashboard");
     } catch (err) {
       if (err instanceof ApiError && err.message === "mfa_required") {
@@ -31,7 +32,6 @@ export default function LoginPage() {
       setLoading(false);
     }
   }
-
   return (
     <div className="auth-page">
       <div className="auth-split">
@@ -56,22 +56,70 @@ export default function LoginPage() {
             <circle cx="248" cy="140" r="5" fill="#0e9488" opacity="0.7" />
           </svg>
         </div>
-
         <div className="auth-form-panel">
           <div className="auth-card">
             <h1>Log in to MoyoSend</h1>
-            <form onSubmit={onSubmit}>
-              <label>
+            <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+              <button
+                type="button"
+                onClick={() => setMethod("email")}
+                style={{
+                  flex: 1,
+                  padding: "10px 16px",
+                  borderRadius: "8px",
+                  border: method === "email" ? "1px solid #0e9488" : "1px solid #d7dbe0",
+                  background: method === "email" ? "#0e9488" : "#ffffff",
+                  color: method === "email" ? "#ffffff" : "#3a4150",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
                 Email
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-              </label>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMethod("phone")}
+                style={{
+                  flex: 1,
+                  padding: "10px 16px",
+                  borderRadius: "8px",
+                  border: method === "phone" ? "1px solid #0e9488" : "1px solid #d7dbe0",
+                  background: method === "phone" ? "#0e9488" : "#ffffff",
+                  color: method === "phone" ? "#ffffff" : "#3a4150",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Phone number
+              </button>
+            </div>
+            <form onSubmit={onSubmit}>
+              {method === "email" ? (
+                <label>
+                  Email
+                  <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+                </label>
+              ) : (
+                <label>
+                  Phone number
+                  <input
+                    type="tel"
+                    required
+                    placeholder="e.g. +447700900000"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                  />
+                </label>
+              )}
               <label>
                 Password
                 <PasswordInput required value={password} onChange={(e) => setPassword(e.target.value)} />
               </label>
-              <p className="muted" style={{ textAlign: "right", marginTop: "-8px" }}>
-                <Link to="/forgot-password">Forgot password?</Link>
-              </p>
+              {method === "email" && (
+                <p className="muted" style={{ textAlign: "right", marginTop: "-8px" }}>
+                  <Link to="/forgot-password">Forgot password?</Link>
+                </p>
+              )}
               {mfaRequired && (
                 <label>
                   6-digit authentication code

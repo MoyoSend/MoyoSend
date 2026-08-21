@@ -10,7 +10,7 @@ interface AuthState {
   dismissNewDeviceAlert: () => void;
   signUp: (email: string, password: string, homeCountry: string, referralOrPromoCode?: string) => Promise<void>;
   completePhoneSignUp: (userId: string, code: string) => Promise<void>;
-  login: (email: string, password: string, mfaCode?: string) => Promise<void>;
+  login: (identifier: { email?: string; phone?: string }, password: string, mfaCode?: string) => Promise<void>;
   logout: () => void;
   updateUser: (patch: Partial<NonNullable<AuthResponse["user"]>>) => void;
 }
@@ -44,8 +44,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applyAuth]
   );
   const login = useCallback(
-    async (email: string, password: string, mfaCode?: string) => {
-      const res = await api.login(email, password, mfaCode);
+    async (identifier: { email?: string; phone?: string }, password: string, mfaCode?: string) => {
+      const res = await api.login(identifier, password, mfaCode);
       applyAuth(res);
     },
     [applyAuth]
