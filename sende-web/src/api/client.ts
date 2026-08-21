@@ -208,7 +208,9 @@ export const api = {
       idempotencyKey,
     }),
 
-  getWalletBalances: () => request<{ balances: WalletBalance[] }>("/wallet/balances"),
+    getWalletBalances: () => request<{ balances: WalletBalance[] }>("/wallet/balances"),
+
+  getKycStatus: () => request<{ status: string; verificationUrl: string | null }>("/kyc/status"),
 
   createPaymentIntent: (
     amountMinor: string,
