@@ -36,6 +36,11 @@ export default function App() {
               </RequireAuth>
             }
           />
+          {/* Any unmatched path (mistyped URL, stale bookmark, an in-app
+              section like "Security" that isn't its own route) falls back
+              to "/", which itself sends signed-in users to /dashboard and
+              everyone else to /login — rather than rendering a blank page. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
