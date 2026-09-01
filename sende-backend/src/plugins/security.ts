@@ -18,8 +18,13 @@ export default fp(async function securityPlugin(app: FastifyInstance) {
     crossOriginResourcePolicy: { policy: "same-site" },
   });
 
+  const allowedOrigins = (env.CORS_ALLOWED_ORIGINS ?? env.FRONTEND_URL)
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+
   await app.register(cors, {
-    origin: env.NODE_ENV === "production" ? env.FRONTEND_URL : true,
+    origin: env.NODE_ENV === "production" ? allowedOrigins : true,
     credentials: true,
   });
 

@@ -47,6 +47,7 @@ const envSchema = z.object({
   // Base URL of the web app, used to build links inside emails (e.g. the
   // password reset link).
   FRONTEND_URL: z.string().default("http://localhost:5173"),
+  CORS_ALLOWED_ORIGINS: z.string().optional(),
 
   KMS_KEY_ID: z.string().optional(),
 });
