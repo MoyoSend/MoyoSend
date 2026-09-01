@@ -1,9 +1,28 @@
 const API_BASE = `${(import.meta.env.VITE_API_URL as string | undefined) ?? ""}/api/v1`;
 
+const ACCESS_TOKEN_STORAGE_KEY = "moyosend_access_token";
+
+// Kept in localStorage (not just in memory) so a page refresh or reopened
+// tab doesn't force a re-login mid-session. The token is short-lived
+// (15 min, see JWT_ACCESS_TOKEN_TTL on the backend), which bounds the
+// exposure window if it were ever read via XSS — the same trade-off most
+// SPA-based apps make in the absence of an httpOnly refresh-token cookie.
 let accessToken: string | null = null;
+try {
+  accessToken = localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+} catch {
+  // localStorage unavailable (private browsing, etc.) — fall back to
+  // in-memory only, same as before.
+}
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
+  try {
+    if (token) localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token);
+    else localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+  } catch {
+    // Ignore — same fallback reasoning as above.
+  }
 }
 
 export function getAccessToken() {
@@ -92,6 +111,8 @@ export const api = {
       method: "POST",
       body: { ...identifier, password, mfaCode, fingerprint: getDeviceFingerprint() },
     }),
+
+  getMe: () => request<{ user: AuthResponse["user"] }>("/auth/me"),
 
   forgotPassword: (email: string) =>
     request<{ message: string }>("/auth/forgot-password", {

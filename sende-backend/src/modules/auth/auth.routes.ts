@@ -151,6 +151,24 @@ export default async function authRoutes(app: FastifyInstance) {
     }
   });
 
+  // Restores a session on page load: the frontend keeps the access token in
+  // localStorage and calls this on mount to confirm it's still valid and
+  // fetch fresh user data, rather than trusting stale client-side state.
+  app.get("/auth/me", { preHandler: [requireAuth] }, async (req, reply) => {
+    const user = await prisma.user.findUnique({ where: { id: req.user.sub } });
+    if (!user || !user.isActive) return reply.unauthorized("Account not found");
+    return reply.send({
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        kycStatus: user.kycStatus,
+        role: user.role,
+        mfaEnabled: user.mfaEnabled,
+      },
+    });
+  });
+
   app.post("/auth/mfa/enroll", { preHandler: [requireAuth] }, async (req, reply) => {
     const { sub } = req.user;
     const user = await prisma.user.findUniqueOrThrow({ where: { id: sub } });
